@@ -181,9 +181,34 @@ change. BPF program runs, and potentially overrides the lookup result, only
 if a 4-tuple match was not found.
 ```
 
-
+![tupian](https://blog.cloudflare.com/linux-transport-protocol-port-selection-performance)
 
 {% embed url="https://blog.cloudflare.com/linux-transport-protocol-port-selection-performance" %}
+
+reuseport挂载程序的点不在常规的skb->cb[]上，而，是为了避免重复调用。以下引用自该功能特性[commit](https://github.com/torvalds/linux/commit/2dbb9b9e6df67d444fbe425c7f6014858d337adf)的描述
+
+>At the SO_REUSEPORT sk lookup time, it is in the middle of transiting
+from a lower layer (ipv4/ipv6) to a upper layer (udp/tcp).  At this
+point,  it is not always clear where the bpf context can be appended
+in the skb->cb[48] to avoid saving-and-restoring cb[].  Even putting
+aside the difference between ipv4-vs-ipv6 and udp-vs-tcp.  It is not
+clear if the lower layer is only ipv4 and ipv6 in the future and
+will it not touch the cb[] again before transiting to the upper
+layer.
+For example, in udp_gro_receive(), it uses the 48 byte NAPI_GRO_CB
+instead of IP[6]CB and it may still modify the cb[] after calling
+the udp[46]_lib_lookup_skb().  Because of the above reason, if
+sk->cb is used for the bpf ctx, saving-and-restoring is needed
+and likely the whole 48 bytes cb[] has to be saved and restored.
+Instead of saving, setting and restoring the cb[], this patch opts
+to create a new "struct sk_reuseport_kern" and setting the needed
+values in there.
+
+所以reuseport prog引入了一个struct sk_reuseport_(kern|md)结构体
+
+sk_select_reuseport()是唯一一个可以使用BPF_MAP_TYPE_REUSEPORT_ARRAY的func。
+
+[参考资料](https://ebpf-docs.dylanreimerink.nl/)
 
 ## 总结
 
