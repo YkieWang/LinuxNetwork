@@ -2,6 +2,8 @@
 
 
 
-<img src=".gitbook/assets/file.excalidraw (4).svg" alt="" class="gitbook-drawing">
+{% embed url="https://patchwork.ozlabs.org/project/netdev/patch/20180808080124.3013877-1-kafai@fb.com/" %}
 
-[https://patchwork.ozlabs.org/project/netdev/patch/20180808080124.3013877-1-kafai@fb.com/](https://patchwork.ozlabs.org/project/netdev/patch/20180808080124.3013877-1-kafai@fb.com/)
+
+
+<img src=".gitbook/assets/file.excalidraw.svg" alt="" class="gitbook-drawing">

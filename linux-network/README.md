@@ -74,7 +74,7 @@ struct udp_hslot {
 
 用流程图来解释下都做了什么
 
-<img src=".gitbook/assets/file.excalidraw (1).svg" alt="" class="gitbook-drawing">
+<img src=".gitbook/assets/file.excalidraw (1) (1).svg" alt="" class="gitbook-drawing">
 
 ### UDP数据包发送到哪个socket？
 
@@ -106,7 +106,7 @@ result = udp4_lib_lookup2(net, saddr, sport,
 
 再来看一下
 
-<img src=".gitbook/assets/file.excalidraw.svg" alt="" class="gitbook-drawing">
+<img src=".gitbook/assets/file.excalidraw (1).svg" alt="" class="gitbook-drawing">
 
 socket得分
 
