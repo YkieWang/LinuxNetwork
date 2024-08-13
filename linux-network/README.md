@@ -110,7 +110,7 @@ result = udp4_lib_lookup2(net, saddr, sport,
 
 socket得分
 
-&#x20;计算得分的一些标准
+计算得分的一些标准
 
 ·接收端口：必须匹配。
 
@@ -129,6 +129,95 @@ socket得分
 ## 内核对reuseport的支持
 
 ## ebpf对socket查找的支持
+
+`BPF_MAP_TYPE_SOCKMAP 底层实现是array`
+
+```
+struct bpf_stab {
+        struct bpf_map map;
+        struct sock **sks;
+        struct sk_psock_progs progs;
+        spinlock_t lock;
+};
+
+const struct bpf_map_ops sock_map_ops = {
+	.map_meta_equal		= bpf_map_meta_equal,
+	.map_alloc		= sock_map_alloc,
+	.map_free		= sock_map_free,
+	.map_get_next_key	= sock_map_get_next_key,
+	.map_lookup_elem_sys_only = sock_map_lookup_sys,
+	.map_update_elem	= sock_map_update_elem,
+	.map_delete_elem	= sock_map_delete_elem,
+	.map_lookup_elem	= sock_map_lookup,
+	.map_release_uref	= sock_map_release_progs,
+	.map_check_btf		= map_check_no_btf,
+	.map_mem_usage		= sock_map_mem_usage,
+	.map_btf_id		= &sock_map_btf_ids[0],
+	.iter_seq_info		= &sock_map_iter_seq_info,
+};
+```
+
+`BPF_MAP_TYPE_SOCKHASH 底层实现是hash`
+
+```
+struct bpf_shtab {
+        struct bpf_map map;
+        struct bpf_shtab_bucket *buckets;
+        u32 buckets_num;
+        u32 elem_size;
+        struct sk_psock_progs progs;
+        atomic_t count;
+};
+```
+
+&#x20;这两个map都可以使用下面的helper来进行转发。
+
+`bpf_sk_redirect_map()`, `bpf_sk_redirect_hash()`, `bpf_msg_redirect_map()` and `bpf_msg_redirect_hash()`.
+
+当一个socket被插入到这两个map中时，socket的callbacks会被替换，并且会attach一个struct sk\_psock。sk\_psock继承了attach在map上的程序，这些程序支持的类型如下。
+
+* `msg_parser` program - `BPF_SK_MSG_VERDICT`.
+* `stream_parser` program - `BPF_SK_SKB_STREAM_PARSER`.
+* `stream_verdict` program - `BPF_SK_SKB_STREAM_VERDICT`.
+* `skb_verdict` program - `BPF_SK_SKB_VERDICT`.
+
+函数实现在
+
+```
+sock_map_update_common
+```
+
+
+
+<img src=".gitbook/assets/file.excalidraw (5).svg" alt="" class="gitbook-drawing">
+
+挂载到map的如下成员中，实现函数是sock\_map\_attach\_prog
+
+```
+struct sk_psock_progs {
+        struct bpf_prog *msg_parser;
+        struct bpf_prog *stream_parser;
+        struct bpf_prog *stream_verdict;
+        struct bpf_prog *skb_verdict;
+};
+```
+
+参考文档：[https://docs.kernel.org/bpf/map\_sockmap.html](https://docs.kernel.org/bpf/map\_sockmap.html)
+
+
+
+`BPF_MAP_TYPE_REUSEPORT_SOCKARRAY`
+
+```
+struct reuseport_array {
+	struct bpf_map map;
+	struct sock __rcu *ptrs[];
+};
+```
+
+`bpf_sk_select_reuseport,BPF_PROG_TYPE_SK_REUSEPORT可以使用这个helper`
+
+Since [ v5.8](https://github.com/torvalds/linux/commit/64d85290d79c0677edb5a8ee2295b36c022fa5df) [`BPF_MAP_TYPE_SOCKHASH`](https://ebpf-docs.dylanreimerink.nl/linux/map-type/BPF\_MAP\_TYPE\_SOCKHASH/) and [`BPF_MAP_TYPE_SOCKMAP`](https://ebpf-docs.dylanreimerink.nl/linux/map-type/BPF\_MAP\_TYPE\_SOCKMAP/) maps can also be used with this helper.
 
 ## ebpf对自定义reuseport选择算法的支持
 
@@ -159,15 +248,11 @@ else
         sk2 = run_bpf_filter(reuse, socks, prog, skb, hdr_len);
 ```
 
-
-
-reuseport ebpg prog挂载的地方如下图
+reuseport ebpg prog挂载的地方如下图，attached to a `SO_REUSEPORT` socket group
 
 <img src=".gitbook/assets/file.excalidraw (2).svg" alt="" class="gitbook-drawing">
 
 所以挂载的时候，监听同一个端口的这些socket，只有第一个socket需要挂载ebpf程序
-
-
 
 {% embed url="https://lore.kernel.org/bpf/20200713174654.642628-9-jakub@cloudflare.com/" %}
 
@@ -185,30 +270,63 @@ if a 4-tuple match was not found.
 
 {% embed url="https://blog.cloudflare.com/linux-transport-protocol-port-selection-performance" %}
 
-reuseport挂载程序的点不在常规的skb->cb[]上，而，是为了避免重复调用。以下引用自该功能特性[commit](https://github.com/torvalds/linux/commit/2dbb9b9e6df67d444fbe425c7f6014858d337adf)的描述
+reuseport挂载程序的点不在常规的skb->cb\[]上，而，是为了避免重复调用。以下引用自该功能特性[commit](https://github.com/torvalds/linux/commit/2dbb9b9e6df67d444fbe425c7f6014858d337adf)的描述
 
->At the SO_REUSEPORT sk lookup time, it is in the middle of transiting
-from a lower layer (ipv4/ipv6) to a upper layer (udp/tcp).  At this
-point,  it is not always clear where the bpf context can be appended
-in the skb->cb[48] to avoid saving-and-restoring cb[].  Even putting
-aside the difference between ipv4-vs-ipv6 and udp-vs-tcp.  It is not
-clear if the lower layer is only ipv4 and ipv6 in the future and
-will it not touch the cb[] again before transiting to the upper
-layer.
-For example, in udp_gro_receive(), it uses the 48 byte NAPI_GRO_CB
-instead of IP[6]CB and it may still modify the cb[] after calling
-the udp[46]_lib_lookup_skb().  Because of the above reason, if
-sk->cb is used for the bpf ctx, saving-and-restoring is needed
-and likely the whole 48 bytes cb[] has to be saved and restored.
-Instead of saving, setting and restoring the cb[], this patch opts
-to create a new "struct sk_reuseport_kern" and setting the needed
-values in there.
+> At the SO\_REUSEPORT sk lookup time, it is in the middle of transiting from a lower layer (ipv4/ipv6) to a upper layer (udp/tcp). At this point, it is not always clear where the bpf context can be appended in the skb->cb\[48] to avoid saving-and-restoring cb\[]. Even putting aside the difference between ipv4-vs-ipv6 and udp-vs-tcp. It is not clear if the lower layer is only ipv4 and ipv6 in the future and will it not touch the cb\[] again before transiting to the upper layer. For example, in udp\_gro\_receive(), it uses the 48 byte NAPI\_GRO\_CB instead of IP\[6]CB and it may still modify the cb\[] after calling the udp\[46]\_lib\_lookup\_skb(). Because of the above reason, if sk->cb is used for the bpf ctx, saving-and-restoring is needed and likely the whole 48 bytes cb\[] has to be saved and restored. Instead of saving, setting and restoring the cb\[], this patch opts to create a new "struct sk\_reuseport\_kern" and setting the needed values in there.
 
-所以reuseport prog引入了一个struct sk_reuseport_(kern|md)结构体
+所以reuseport prog引入了一个struct sk\_reuseport\_(kern|md)结构体
 
-sk_select_reuseport()是唯一一个可以使用BPF_MAP_TYPE_REUSEPORT_ARRAY的func。
+sk\_select\_reuseport()是唯一一个可以使用BPF\_MAP\_TYPE\_REUSEPORT\_ARRAY的func。
 
 [参考资料](https://ebpf-docs.dylanreimerink.nl/)
+
+helper函数，其实也是通过map\_lookup\_elem来查找socket，只不过是多做了一些检查。
+
+```
+BPF_CALL_4(sk_select_reuseport, struct sk_reuseport_kern *, reuse_kern,
+       struct bpf_map *, map, void *, key, u32, flags)
+{
+    bool is_sockarray = map->map_type == BPF_MAP_TYPE_REUSEPORT_SOCKARRAY;
+    struct sock_reuseport *reuse;
+    struct sock *selected_sk;
+
+    selected_sk = map->ops->map_lookup_elem(map, key);
+    if (!selected_sk)
+       return -ENOENT;
+
+    reuse = rcu_dereference(selected_sk->sk_reuseport_cb);
+    if (!reuse) {
+       /* Lookup in sock_map can return TCP ESTABLISHED sockets. */
+       if (sk_is_refcounted(selected_sk))
+          sock_put(selected_sk);
+
+       /* reuseport_array has only sk with non NULL sk_reuseport_cb.
+        * The only (!reuse) case here is - the sk has already been
+        * unhashed (e.g. by close()), so treat it as -ENOENT.
+        *
+        * Other maps (e.g. sock_map) do not provide this guarantee and
+        * the sk may never be in the reuseport group to begin with.
+        */
+       return is_sockarray ? -ENOENT : -EINVAL;
+    }
+
+    if (unlikely(reuse->reuseport_id != reuse_kern->reuseport_id)) {
+       struct sock *sk = reuse_kern->sk;
+
+       if (sk->sk_protocol != selected_sk->sk_protocol)
+          return -EPROTOTYPE;
+       else if (sk->sk_family != selected_sk->sk_family)
+          return -EAFNOSUPPORT;
+
+       /* Catch all. Likely bound to a different sockaddr. */
+       return -EBADFD;
+    }
+
+    reuse_kern->selected_sk = selected_sk;
+
+    return 0;
+}
+```
 
 ## 总结
 
