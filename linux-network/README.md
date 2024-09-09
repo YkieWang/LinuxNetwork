@@ -219,6 +219,54 @@ struct reuseport_array {
 
 Since [ v5.8](https://github.com/torvalds/linux/commit/64d85290d79c0677edb5a8ee2295b36c022fa5df) [`BPF_MAP_TYPE_SOCKHASH`](https://ebpf-docs.dylanreimerink.nl/linux/map-type/BPF\_MAP\_TYPE\_SOCKHASH/) and [`BPF_MAP_TYPE_SOCKMAP`](https://ebpf-docs.dylanreimerink.nl/linux/map-type/BPF\_MAP\_TYPE\_SOCKMAP/) maps can also be used with this helper.
 
+上面说的这几个map的value在用户层面看起来都是socket fd，我们知道fd是进程级别的资源，出了这个进程范围就不好使了，那这些socket  map是如何存储这个socket fd的呢？原来在update的操作中，接口已经帮我们通过这个 fd找到了内核中真正的socket并存储起来了。socket hash map的update接口实现如下。
+
+````c
+// Some code
+```c
+int sock_map_update_elem_sys(struct bpf_map *map, void *key, void *value,
+			     u64 flags)
+{
+	struct socket *sock;
+	struct sock *sk;
+	int ret;
+	u64 ufd;
+
+	if (map->value_size == sizeof(u64))
+		ufd = *(u64 *)value;
+	else
+		ufd = *(u32 *)value;
+	if (ufd > S32_MAX)
+		return -EINVAL;
+
+	sock = sockfd_lookup(ufd, &ret);
+	if (!sock)
+		return ret;
+	sk = sock->sk;
+	if (!sk) {
+		ret = -EINVAL;
+		goto out;
+	}
+	if (!sock_map_sk_is_suitable(sk)) {
+		ret = -EOPNOTSUPP;
+		goto out;
+	}
+
+	sock_map_sk_acquire(sk);
+	if (!sock_map_sk_state_allowed(sk))
+		ret = -EOPNOTSUPP;
+	else if (map->map_type == BPF_MAP_TYPE_SOCKMAP)
+		ret = sock_map_update_common(map, *(u32 *)key, sk, flags);
+	else
+		ret = sock_hash_update_common(map, key, sk, flags);
+	sock_map_sk_release(sk);
+out:
+	sockfd_put(sock);
+	return ret;
+}
+```
+````
+
 ## ebpf对自定义reuseport选择算法的支持
 
 能够影响socket select的地方有两个，分别是，并且是按照如下顺序的
