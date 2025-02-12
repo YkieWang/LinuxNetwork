@@ -12,7 +12,7 @@
 
 我们后续讲解的都是内核中的流程，所以使用的都是struct sock。
 
-![](https://www.kerneltravel.net/blog/2020/net\_struct/imgs/1.png)
+![](https://www.kerneltravel.net/blog/2020/net_struct/imgs/1.png)
 
 {% embed url="https://www.kerneltravel.net/blog/2020/net_struct/" %}
 
@@ -74,7 +74,7 @@ struct udp_hslot {
 
 用流程图来解释下都做了什么
 
-<img src=".gitbook/assets/file.excalidraw (1) (1).svg" alt="" class="gitbook-drawing">
+<img src=".gitbook/assets/file.excalidraw (1) (1) (1).svg" alt="" class="gitbook-drawing">
 
 ### UDP数据包发送到哪个socket？
 
@@ -106,7 +106,7 @@ result = udp4_lib_lookup2(net, saddr, sport,
 
 再来看一下
 
-<img src=".gitbook/assets/file.excalidraw (1).svg" alt="" class="gitbook-drawing">
+<img src=".gitbook/assets/file.excalidraw (1) (1).svg" alt="" class="gitbook-drawing">
 
 socket得分
 
@@ -202,7 +202,7 @@ struct sk_psock_progs {
 };
 ```
 
-参考文档：[https://docs.kernel.org/bpf/map\_sockmap.html](https://docs.kernel.org/bpf/map\_sockmap.html)
+参考文档：[https://docs.kernel.org/bpf/map\_sockmap.html](https://docs.kernel.org/bpf/map_sockmap.html)
 
 
 
@@ -217,7 +217,7 @@ struct reuseport_array {
 
 `bpf_sk_select_reuseport,BPF_PROG_TYPE_SK_REUSEPORT可以使用这个helper`
 
-Since [ v5.8](https://github.com/torvalds/linux/commit/64d85290d79c0677edb5a8ee2295b36c022fa5df) [`BPF_MAP_TYPE_SOCKHASH`](https://ebpf-docs.dylanreimerink.nl/linux/map-type/BPF\_MAP\_TYPE\_SOCKHASH/) and [`BPF_MAP_TYPE_SOCKMAP`](https://ebpf-docs.dylanreimerink.nl/linux/map-type/BPF\_MAP\_TYPE\_SOCKMAP/) maps can also be used with this helper.
+Since [ v5.8](https://github.com/torvalds/linux/commit/64d85290d79c0677edb5a8ee2295b36c022fa5df) [`BPF_MAP_TYPE_SOCKHASH`](https://ebpf-docs.dylanreimerink.nl/linux/map-type/BPF_MAP_TYPE_SOCKHASH/) and [`BPF_MAP_TYPE_SOCKMAP`](https://ebpf-docs.dylanreimerink.nl/linux/map-type/BPF_MAP_TYPE_SOCKMAP/) maps can also be used with this helper.
 
 上面说的这几个map的value在用户层面看起来都是socket fd，我们知道fd是进程级别的资源，出了这个进程范围就不好使了，那这些socket  map是如何存储这个socket fd的呢？原来在update的操作中，接口已经帮我们通过这个 fd找到了内核中真正的socket并存储起来了。socket hash map的update接口实现如下。
 
