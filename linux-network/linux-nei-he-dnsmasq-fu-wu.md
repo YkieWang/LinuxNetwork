@@ -47,3 +47,11 @@ dnsmasq.conf文件中可以配置server地址，通过指定使用哪个DNS服�
 
 不匹配的则走dnsmasq定义的上游DNS，从/etc/dnsmasq.conf文件中读取resolv-file=/path/file，从file中获取upstream的DNS服务器的地址
 
+
+
+先查找`hosts`文件，再查找`/etc/dnsmasq.d/*.conf`，之后查找`/etc/dnsmasq.conf`。
+
+是否查找`hosts`，还能通过`no-hosts`来定义，`no-hosts`表示不查找hosts文件。
+
+因此，如果你想让dnsmasq本身提供解析服务，且无需去上游DNS查询，或者说你要做任意域名的DNS解析，就可以将记录写到上面任意一个文件，conf的语法形如：`address=/test.com/192.168.1.1`，hosts则遵循hosts文件的语法：`192.168.1.1 test.com`。
+
